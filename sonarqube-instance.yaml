@@ -1,0 +1,22 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS CloudFormation template to deploy SonarQube Community Edition (single instance)
+Meatadata: null
+Parameters: null
+Mappings: null
+Conditions: null # whether to use RDS dedicated database or embedded database
+Transform: null
+Resources:
+  MyDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBSecurityGroups:
+      - Ref: MyDbSecurityByEC2SecurityGroup
+      - Ref: MyDbSecurityByCIDRIPGroup
+      AllocatedStorage: '5'
+      DBInstanceClass: db.m1.small
+      Engine: MySQL
+      MasterUsername: MyName
+      MasterUserPassword: MyPassword
+    DeletionPolicy: Snapshot
+Outputs: null # URL for Sonar Scanner
