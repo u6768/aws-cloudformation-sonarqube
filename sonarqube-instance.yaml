@@ -1,22 +1,38 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: AWS CloudFormation template to deploy SonarQube Community Edition (single instance)
-Meatadata: null
-Parameters: null
-Mappings: null
-Conditions: null # whether to use RDS dedicated database or embedded database
-Transform: null
+Parameters:
+  DBPwd: 
+    NoEcho: true
+    Description: The master user password for postgres
+    Type: String
 Resources:
-  MyDB:
+  PostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Allow access to RDS postgres database
+        VpcId: vpc-aa794acf
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 24.60.153.27/32 # my ip
+        SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+  SonarDB:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBSecurityGroups:
-      - Ref: MyDbSecurityByEC2SecurityGroup
-      - Ref: MyDbSecurityByCIDRIPGroup
-      AllocatedStorage: '5'
-      DBInstanceClass: db.m1.small
-      Engine: MySQL
-      MasterUsername: MyName
-      MasterUserPassword: MyPassword
-    DeletionPolicy: Snapshot
-Outputs: null # URL for Sonar Scanner
+      DBName: sonarqube
+      VPCSecurityGroups:
+      - Ref: PostgresSecurityGroup
+      AllocatedStorage: '20'
+      DBInstanceClass: db.t2.medium
+      Engine: postgres
+      MasterUsername: sonarqube
+      MasterUserPassword: !Ref DBPwd
+      StorageType: gp2 # general ssd
+      BackupRetentionPeriod: "0" # disable automated backups when developing the template
+    DeletionPolicy: Delete # do not take final snapshot when developing the template
