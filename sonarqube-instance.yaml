@@ -1,11 +1,13 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: AWS CloudFormation template to deploy SonarQube Community Edition (single instance)
+Metadata: {}
 Parameters:
   DBPwd: 
     NoEcho: true
     Description: The master user password for postgres
     Type: String
+    AllowedPattern: .+ # not empty
 Resources:
   PostgresSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -16,7 +18,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          CidrIp: 24.60.153.27/32 # my ip
+          CidrIp: 0.0.0.0/0 # anywhere
         SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 0
@@ -36,3 +38,25 @@ Resources:
       StorageType: gp2 # general ssd
       BackupRetentionPeriod: "0" # disable automated backups when developing the template
     DeletionPolicy: Delete # do not take final snapshot when developing the template
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: All SSH access to Sonar Server
+      VpcId: vpc-aa794acf
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: '0.0.0.0/0'
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        CidrIp: 0.0.0.0/0
+  SonarServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0ff8a91507f77f867 # HVM (SSD) EBS-Backed 64-bit in us-east-1 (N. Virginia)
+      KeyName: my-aws-keypair
+      SecurityGroupIds:
+      - Ref: ServerSecurityGroup
