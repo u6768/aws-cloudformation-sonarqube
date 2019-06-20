@@ -48,6 +48,10 @@ Resources:
         FromPort: 22
         ToPort: 22
         CidrIp: '0.0.0.0/0'
+      - IpProtocol: tcp
+        FromPort: 9000 # sonar web traffic
+        ToPort: 9000
+        CidrIp: '0.0.0.0/0'
       SecurityGroupEgress:
       - IpProtocol: tcp
         FromPort: 0
@@ -57,6 +61,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-0ff8a91507f77f867 # HVM (SSD) EBS-Backed 64-bit in us-east-1 (N. Virginia)
+      InstanceType: m4.large
       KeyName: my-aws-keypair
       SecurityGroupIds:
       - Ref: ServerSecurityGroup
