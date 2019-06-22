@@ -59,9 +59,39 @@ Resources:
         CidrIp: 0.0.0.0/0
   SonarServer:
     Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          packages: 
+            yum:
+              java-1.8.0-openjdk: []
+          users:
+            sonarqube: # default group with same name will be created
+              homeDir: /home/sonarqube
+          sources:
+            /home/sonarqube: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-7.8.zip
+          files:
+            /home/sonarqube/init.sh:
+              content: !Sub |
+                # Linux requirements (https://docs.sonarqube.org/latest/requirements/requirements/#header-6)
+                sysctl -w vm.max_map_count=262144
+                sysctl -w fs.file-max=65536
+            /etc/security/limits.d/99-sonarqube.conf:
+              content: !Sub |
+                sonarqube   -   nofile   65536
+                sonarqube   -   nproc    4096
+          commands:
+            linux-setup:
+              command: /bin/bash /home/sonarqube/init.sh
     Properties:
       ImageId: ami-0ff8a91507f77f867 # HVM (SSD) EBS-Backed 64-bit in us-east-1 (N. Virginia)
       InstanceType: m4.large
       KeyName: my-aws-keypair
       SecurityGroupIds:
       - Ref: ServerSecurityGroup
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            yum update -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SonarServer --region ${AWS::Region}
