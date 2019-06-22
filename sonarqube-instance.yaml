@@ -76,10 +76,16 @@ Resources:
                 # Linux requirements (https://docs.sonarqube.org/latest/requirements/requirements/#header-6)
                 sysctl -w vm.max_map_count=262144
                 sysctl -w fs.file-max=65536
+                sed -i '/^wrapper\.java\.command=.*$/c\wrapper.java.command=java8' /home/sonarqube/sonarqube-7.8/conf/wrapper.conf
             /etc/security/limits.d/99-sonarqube.conf:
               content: !Sub |
                 sonarqube   -   nofile   65536
                 sonarqube   -   nproc    4096
+            /home/sonarqube/sonarqube-7.8/conf/sonar.properties:
+              content: !Sub |
+                sonar.jdbc.username=sonarqube
+                sonar.jdbc.password=mypassword
+                sonar.jdbc.url=jdbc:postgresql://${SonarDB.Endpoint.Address}:${SonarDB.Endpoint.Port}/sonarqube
           commands:
             linux-setup:
               command: /bin/bash /home/sonarqube/init.sh
