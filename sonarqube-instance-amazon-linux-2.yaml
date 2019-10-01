@@ -1,0 +1,169 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy SonarQube platform into AWS cloud
+Metadata:
+  Author: Yi Yang
+Parameters:
+  KeyNameParameter:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Select key pair to allow SSH connection
+  VPCIdParameter:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC to provision resources
+  AMIParameter:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0b898040803850657  # Amazon Linux 2 AMI (HVM), SSD Volume Type (us-east-1)
+    Description: Select the AMI to launch EC2 instance
+  SubnetIdParameter:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select the subnet to launch EC2 instance
+  SubnetIdParameter2:
+    Type: AWS::EC2::Subnet::Id
+    Description: RDS instance requires at least 2 subnets in subnet group
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.medium # sonarqube web node requires at least 2GB RAM
+    AllowedValues:  # more instance types can be added later on if required
+      - t2.medium  
+      - m4.large
+    Description: Select the instance type to launch EC2 instance
+  SonarqubeInstallationParameter:
+    Type: String
+    Description: S3 URL to download SonarQube installer via AWS cli
+  InstanceProfileParameter:
+    Type: String
+    Description: Include service role for EC2 instance to access S3 objects
+  InstanceRoleParameter:
+    Type: String
+    Description: Service role to access S3 buckets
+  SecurityGroupParameter:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Default security group name
+  VPCSecurityGroupParameter:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Default security group name    
+  DBUsernameParameter:
+    Type: String
+    Default: sonarqube
+    Description: Default RDS postgres username
+  DBPasswordParameter:
+    Type: String
+    Default: sonarqube
+    Description: Default RDS postgres password (at least 8 ascii chars)
+    NoEcho: true
+  DBNameParameter:
+    Type: String
+    Default: sonar
+    Description: Name of RDS instance
+  DBStorageParameter:
+    Type: String
+    Default: "20"
+    Description: Number of GB for RDS storage
+  DBInstanceClassParameter:
+    Type: String
+    Default: db.t2.micro
+    AllowedValues:
+      - db.t2.micro
+      - db.t2.medium
+      - db.t2.large
+      - db.m5.large
+    Description: Instance class for RDS postgres
+  DBBackupRetentionPeriodParamter:
+    Type: Number
+    Default: 0  # disable auto backup by default during development
+    Description: Retention period in days for automatic RDS backup
+Resources:
+  AppInstance1:
+    Type: AWS::EC2::Instance
+    DependsOn: DBInstance1
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            - write-bootstrap-file
+            - exec-bootstrap-file
+        write-bootstrap-file:
+          files:
+            /etc/sysctl.d/99-sonarqube.conf:
+              content: !Sub |
+                vm.max_map_count=262144
+                fs.file-max=65536
+            /etc/security/limits.conf:
+              content: !Sub |
+                *   -   nofile   65536
+                *   -   nproc    4096
+            /tmp/soanr-bootstrap.sh:
+              content: !Sub |
+                #!/bin/bash -ex
+                S3AccessCreds=$(curl http://169.254.169.254/latest/meta-data/iam/security-credentials/)
+                while [ $S3AccessCreds != "${InstanceRoleParameter}" ]; do sleep 1s; echo 'Waiting App Config automation ...'; done
+                mkdir /etc/sonar
+                sleep 5 # delay a bit to let role creds populate
+                aws s3 cp ${SonarqubeInstallationParameter} /etc/sonar
+                cd /etc/sonar
+                unzip *.zip
+                sysctl --system # reload sysctrl conf files to meet Linux platform requirements
+                # write sonar config file dynamically
+                cat > /etc/sonar/sonarqube-7.9.1/conf/sonar.properties << EOF
+                sonar.jdbc.url=jdbc:postgresql://${DBInstance1.Endpoint.Address}/${DBNameParameter}
+                sonar.jdbc.username=${DBUsernameParameter}
+                sonar.jdbc.password=${DBPasswordParameter}
+                sonar.web.port=8080
+                EOF
+                chown -R ec2-user /etc/sonar/sonarqube-7.9.1
+                su - ec2-user -c "/etc/sonar/sonarqube-7.9.1/bin/linux-x86-64/sonar.sh start"
+        exec-bootstrap-file:
+          commands:
+            cmd1:
+              command: bash -xe /tmp/soanr-bootstrap.sh
+    Properties: 
+      ImageId: !Ref AMIParameter
+      KeyName: !Ref KeyNameParameter
+      SubnetId: !Ref SubnetIdParameter
+      InstanceType: !Ref InstanceTypeParameter
+      SecurityGroupIds:
+        - !Ref SecurityGroupParameter
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            yum update -y
+            amazon-linux-extras install java-openjdk11  # sonarqube requires JDK 8+
+            update-alternatives --set java /usr/lib/jvm/java-11-openjdk-11.0.2.7-0.amzn2.x86_64/bin/java  # set java to use java 11
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AppInstance1 --region ${AWS::Region} --configsets default
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AppInstance1 --region ${AWS::Region}
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT3M  # 3 mins
+  DBSubnetGroup1:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Sonar postgres DB in default VPC
+      SubnetIds:
+        - !Ref SubnetIdParameter
+        - !Ref SubnetIdParameter2
+  DBInstance1:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete  # no snapshot when developing the CFN configuration
+    Properties:
+      DBName: !Ref DBNameParameter
+      AllocatedStorage: !Ref DBStorageParameter  # between 20 and 65536 GB for RDS postgres
+      DBInstanceClass: !Ref DBInstanceClassParameter
+      DBSubnetGroupName: !Ref DBSubnetGroup1
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriodParamter
+      Engine: postgres
+      MasterUsername: !Ref DBUsernameParameter
+      MasterUserPassword: !Ref DBPasswordParameter
+      VPCSecurityGroups:
+        - !Ref VPCSecurityGroupParameter
+Outputs:
+  SSHConnection:
+    Description: SSH connection string to SonarQube EC2 instance
+    Value: !Sub "ec2-user@${AppInstance1.PrivateIp}"
+  PostgresEndpoint:
+    Description: Endpoint to RDS Postgres DB Instance
+    Value: !Sub "${DBInstance1.Endpoint.Address}:${DBInstance1.Endpoint.Port}"
+  SonarqubeURL:
+    Description: Login URL for SonarQube
+    Value: !Sub "http://${AppInstance1.PrivateIp}:8080"
